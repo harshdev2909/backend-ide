@@ -333,6 +333,20 @@ class CompilationService {
       const { stdout: stellarVersion } = await execAsync('stellar --version');
       log('info', `Stellar CLI found: ${stellarVersion.trim()}`);
       
+      // Ensure proper project structure
+      log('info', 'Setting up Rust project structure...');
+      const srcDir = path.join(projectDir, 'src');
+      await fs.ensureDir(srcDir);
+      
+      // Check if main.rs exists and move it to lib.rs if needed
+      const mainPath = path.join(srcDir, 'main.rs');
+      const libPath = path.join(srcDir, 'lib.rs');
+      
+      if (await fs.pathExists(mainPath) && !(await fs.pathExists(libPath))) {
+        await fs.move(mainPath, libPath);
+        log('info', 'Moved main.rs to lib.rs for library project');
+      }
+      
       // Change to project directory and run stellar contract build
       log('info', 'Building contract with Stellar CLI...');
       const { stdout, stderr } = await execAsync('stellar contract build', { cwd: projectDir });
