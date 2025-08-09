@@ -382,15 +382,28 @@ class CompilationService {
           if (await fs.pathExists(mainPath) && !(await fs.pathExists(libPath))) {
             await fs.move(mainPath, libPath);
             log('info', 'Moved main.rs to lib.rs for library project');
+          } else if (!(await fs.pathExists(libPath))) {
+            // Create lib.rs if it doesn't exist - find any .rs file in the project
+            const files = await fs.readdir(buildDir);
+            const rsFiles = files.filter(f => f.endsWith('.rs'));
+            if (rsFiles.length > 0) {
+              const sourceFile = path.join(buildDir, rsFiles[0]);
+              await fs.copy(sourceFile, libPath);
+              log('info', `Created lib.rs from ${rsFiles[0]}`);
+            }
           }
           
-          // Fix library name to match the actual file structure
-          if (cargoContent.includes('name = "hello_world"') && cargoContent.includes('[lib]')) {
-            // Replace [lib] section to use path = "src/lib.rs"
-            const updatedContent = cargoContent.replace(/\[lib\][\s\S]*?(?=\n\[|\n$|$)/m, '[lib]\npath = "src/lib.rs"');
-            await fs.writeFile(cargoTomlPath, updatedContent);
-            log('info', 'Fixed Cargo.toml library path configuration');
+          // Fix library path issue by ensuring [lib] section exists
+          let updatedContent;
+          if (cargoContent.includes('[lib]')) {
+            // Replace existing [lib] section
+            updatedContent = cargoContent.replace(/\[lib\][\s\S]*?(?=\n\[|\n$|$)/m, '[lib]\npath = "src/lib.rs"');
+          } else {
+            // Add [lib] section
+            updatedContent = cargoContent + '\n\n[lib]\npath = "src/lib.rs"\n';
           }
+          await fs.writeFile(cargoTomlPath, updatedContent);
+          log('info', 'Fixed Cargo.toml library path configuration');
         }
       }
       
@@ -398,7 +411,8 @@ class CompilationService {
       log('info', `Building contract with Stellar CLI from: ${path.relative(projectDir, buildDir)}`);
       const { stdout, stderr } = await execAsync('stellar contract build', { cwd: buildDir });
       
-      if (stderr && !stderr.includes('warning')) {
+      // Check for actual compilation errors (not just stderr output)
+      if (stderr && (stderr.includes('error:') || stderr.includes('failed')) && !stderr.includes('Build Complete')) {
         throw new Error(stderr);
       }
       
@@ -416,10 +430,11 @@ class CompilationService {
       
       // First try the newer wasm32v1-none target
       const newTargetPath = path.join(buildDir, 'target', 'wasm32v1-none', 'release');
+      log('info', `Checking for WASM files in: ${newTargetPath}`);
       if (await fs.pathExists(newTargetPath)) {
         wasmFiles = await fs.readdir(newTargetPath).catch(() => []);
         targetDir = newTargetPath;
-        log('info', 'Using wasm32v1-none target directory');
+        log('info', `Using wasm32v1-none target directory, found ${wasmFiles.length} files: ${wasmFiles.join(', ')}`);
       }
       
       // Fall back to older wasm32-unknown-unknown target if no files found
@@ -440,7 +455,7 @@ class CompilationService {
         
         log('success', `Real compilation successful! Generated ${wasmFile} (${wasmContent.length} bytes)`);
         
-        return {
+        const result = {
           success: true,
           output: {
             wasm: wasmContent.toString('base64'),
@@ -449,6 +464,9 @@ class CompilationService {
           logs: logs,
           compilationType: 'real'
         };
+        
+        log('info', `Returning success result with ${result.output.wasm.length} chars of base64 WASM data`);
+        return result;
       } else {
         throw new Error('No WASM file generated');
       }

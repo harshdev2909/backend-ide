@@ -21,9 +21,10 @@ router.post('/', async (req, res) => {
     res.json({
       success: result.success,
       logs: result.logs,
-      wasmUrl: result.wasmUrl,
-      wasmBase64: result.wasmBase64,
-      projectId: result.projectId,
+      wasmBase64: result.output?.wasm,
+      wasmFile: result.output?.wasmFile,
+      compilationType: result.compilationType,
+      projectId: projectId,
       error: result.error
     });
   } catch (error) {
