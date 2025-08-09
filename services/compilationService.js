@@ -347,6 +347,20 @@ class CompilationService {
         log('info', 'Moved main.rs to lib.rs for library project');
       }
       
+      // Fix Cargo.toml library name/path issue
+      const cargoTomlPath = path.join(projectDir, 'Cargo.toml');
+      if (await fs.pathExists(cargoTomlPath)) {
+        let cargoContent = await fs.readFile(cargoTomlPath, 'utf8');
+        
+        // Fix library name to match the actual file structure
+        if (cargoContent.includes('name = "hello_world"') && cargoContent.includes('[lib]')) {
+          // Replace [lib] section to use path = "src/lib.rs"
+          cargoContent = cargoContent.replace(/\[lib\][\s\S]*?(?=\n\[|\n$|$)/m, '[lib]\npath = "src/lib.rs"');
+          await fs.writeFile(cargoTomlPath, cargoContent);
+          log('info', 'Fixed Cargo.toml library path configuration');
+        }
+      }
+      
       // Change to project directory and run stellar contract build
       log('info', 'Building contract with Stellar CLI...');
       const { stdout, stderr } = await execAsync('stellar contract build', { cwd: projectDir });
