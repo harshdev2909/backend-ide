@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y \
 RUN rustup target add wasm32v1-none
 
 # Install Soroban CLI
-RUN curl -sSfL https://soroban.stellar.org/install.sh | sh
+RUN curl -sSfL https://github.com/stellar/stellar-cli/releases/latest/download/stellar-cli-installer.sh | sh
 ENV PATH="/root/.local/bin:$PATH"
 
 # Create working directory
@@ -26,7 +26,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install Node.js dependencies
-RUN npm ci --only=production
+RUN npm ci --omit=dev
 
 # Copy application files
 COPY . .
