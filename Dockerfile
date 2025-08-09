@@ -16,12 +16,15 @@ RUN apt-get update && apt-get install -y \
 RUN rustup target add wasm32v1-none
 
 # Install Stellar CLI (which includes Soroban functionality)
-RUN cargo install --locked stellar-cli
+# Use pre-compiled binary to avoid memory issues during compilation
+RUN curl -L -o /tmp/stellar-cli.tar.gz https://github.com/stellar/stellar-cli/releases/download/v23.0.0/stellar-cli-23.0.0-x86_64-unknown-linux-gnu.tar.gz \
+    && tar -xzf /tmp/stellar-cli.tar.gz -C /tmp \
+    && mv /tmp/stellar-cli-23.0.0-x86_64-unknown-linux-gnu/stellar /usr/local/bin/stellar \
+    && chmod +x /usr/local/bin/stellar \
+    && rm -rf /tmp/stellar-cli*
 
 # Create symlink for backward compatibility (soroban -> stellar)
-RUN ln -s /root/.cargo/bin/stellar /root/.cargo/bin/soroban
-
-ENV PATH="/root/.cargo/bin:$PATH"
+RUN ln -s /usr/local/bin/stellar /usr/local/bin/soroban
 
 # Create working directory
 WORKDIR /app
