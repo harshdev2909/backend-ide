@@ -21,10 +21,10 @@ RUN rustup target add wasm32v1-none
 RUN cargo install --locked stellar-cli
 
 # Create symlink for backward compatibility (soroban -> stellar)
-RUN ln -s /root/.cargo/bin/stellar /root/.cargo/bin/soroban
+RUN ln -s /usr/local/cargo/bin/stellar /usr/local/cargo/bin/soroban
 
 # Add cargo bin to PATH
-ENV PATH="/root/.cargo/bin:$PATH"
+ENV PATH="/usr/local/cargo/bin:$PATH"
 
 # Create working directory
 WORKDIR /app
