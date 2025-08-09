@@ -23,9 +23,9 @@ RUN ARCH=$(uname -m) && \
     curl -L "https://github.com/stellar/stellar-cli/releases/download/v23.0.0/stellar-cli-23.0.0-${ARCH_NAME}.tar.gz" \
     -o stellar-cli.tar.gz && \
     tar -xzf stellar-cli.tar.gz && \
-    mv stellar-cli-*/stellar /usr/local/bin/stellar && \
-    rm -rf stellar-cli*
-
+    chmod +x stellar && \
+    mv stellar /usr/local/bin/stellar && \
+    rm -rf stellar-cli.tar.gz
 # Create symlink for backward compatibility (soroban -> stellar)
 RUN ln -s /usr/local/bin/stellar /usr/local/bin/soroban
 
