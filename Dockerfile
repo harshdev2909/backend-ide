@@ -15,9 +15,13 @@ RUN apt-get update && apt-get install -y \
 # Install wasm32v1 target for Rust 1.85+
 RUN rustup target add wasm32v1-none
 
-# Install Soroban CLI
-RUN curl -sSfL https://soroban.stellar.org/install.sh | sh
-ENV PATH="/root/.local/bin:$PATH"
+# Install Stellar CLI (which includes Soroban functionality)
+RUN cargo install --locked stellar-cli
+
+# Create symlink for backward compatibility (soroban -> stellar)
+RUN ln -s /root/.cargo/bin/stellar /root/.cargo/bin/soroban
+
+ENV PATH="/root/.cargo/bin:$PATH"
 
 # Create working directory
 WORKDIR /app
