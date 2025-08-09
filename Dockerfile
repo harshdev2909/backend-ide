@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y \
 # Install wasm32v1 target for Rust 1.85+
 RUN rustup target add wasm32v1-none
 
-# Install Stellar CLI (detect architecture)
+# Install Stellar CLI (auto-detect architecture & handle tarball changes)
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then ARCH_NAME="x86_64-unknown-linux-gnu"; \
     elif [ "$ARCH" = "aarch64" ]; then ARCH_NAME="aarch64-unknown-linux-gnu"; \
@@ -23,9 +23,12 @@ RUN ARCH=$(uname -m) && \
     curl -L "https://github.com/stellar/stellar-cli/releases/download/v23.0.0/stellar-cli-23.0.0-${ARCH_NAME}.tar.gz" \
     -o stellar-cli.tar.gz && \
     tar -xzf stellar-cli.tar.gz && \
-    chmod +x stellar && \
-    mv stellar /usr/local/bin/stellar && \
-    rm -rf stellar-cli.tar.gz
+    # Find the binary no matter its name/location
+    BIN_PATH=$(find . -type f -name "stellar" -o -name "stellar-cli" -o -name "soroban" | head -n 1) && \
+    chmod +x "$BIN_PATH" && \
+    mv "$BIN_PATH" /usr/local/bin/stellar && \
+    ln -s /usr/local/bin/stellar /usr/local/bin/soroban && \
+    rm -rf stellar-cli.tar.gz stellar-cli-* __MACOSX
 # Create symlink for backward compatibility (soroban -> stellar)
 RUN ln -s /usr/local/bin/stellar /usr/local/bin/soroban
 
