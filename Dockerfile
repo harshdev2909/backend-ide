@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     pkg-config \
     libssl-dev \
+    libdbus-1-dev \
     ca-certificates \
     gnupg \
     && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
