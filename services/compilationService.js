@@ -46,6 +46,18 @@ class CompilationService {
 
       log('info', 'Starting real Rust compilation...');
 
+      // Try real compilation with Stellar CLI first
+      try {
+        log('info', 'Attempting real Rust compilation with Stellar CLI...');
+        const realResult = await this.realStellarCompilation(projectDir, logs);
+        if (realResult.success) {
+          return realResult;
+        }
+        log('warning', 'Stellar CLI compilation failed, trying Docker...');
+      } catch (error) {
+        log('warning', 'Stellar CLI not available, trying Docker...');
+      }
+
       // Check if Docker is available
       if (!this.docker) {
         log('warning', 'Docker not available, using fallback compilation');
@@ -298,6 +310,75 @@ class CompilationService {
     } catch (error) {
       console.error('Failed to build compiler image:', error);
       throw error;
+    }
+  }
+
+  async realStellarCompilation(projectDir, logs) {
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+    
+    const log = (type, message) => {
+      const logEntry = {
+        type,
+        message,
+        timestamp: new Date().toISOString()
+      };
+      logs.push(logEntry);
+      console.log(`[${type.toUpperCase()}] ${message}`);
+    };
+
+    try {
+      // Check if stellar CLI is available
+      log('info', 'Checking Stellar CLI availability...');
+      const { stdout: stellarVersion } = await execAsync('stellar --version');
+      log('info', `Stellar CLI found: ${stellarVersion.trim()}`);
+      
+      // Change to project directory and run stellar contract build
+      log('info', 'Building contract with Stellar CLI...');
+      const { stdout, stderr } = await execAsync('stellar contract build', { cwd: projectDir });
+      
+      if (stderr && !stderr.includes('warning')) {
+        throw new Error(stderr);
+      }
+      
+      log('info', 'Stellar CLI build output:');
+      if (stdout) {
+        stdout.split('\n').forEach(line => {
+          if (line.trim()) log('info', line.trim());
+        });
+      }
+      
+      // Look for the compiled WASM file
+      const wasmFiles = await fs.readdir(path.join(projectDir, 'target', 'wasm32-unknown-unknown', 'release')).catch(() => []);
+      const wasmFile = wasmFiles.find(f => f.endsWith('.wasm'));
+      
+      if (wasmFile) {
+        const wasmPath = path.join(projectDir, 'target', 'wasm32-unknown-unknown', 'release', wasmFile);
+        const wasmContent = await fs.readFile(wasmPath);
+        
+        log('success', `Real compilation successful! Generated ${wasmFile} (${wasmContent.length} bytes)`);
+        
+        return {
+          success: true,
+          output: {
+            wasm: wasmContent.toString('base64'),
+            wasmFile: wasmFile
+          },
+          logs: logs,
+          compilationType: 'real'
+        };
+      } else {
+        throw new Error('No WASM file generated');
+      }
+      
+    } catch (error) {
+      log('error', `Real compilation failed: ${error.message}`);
+      return {
+        success: false,
+        error: error.message,
+        logs: logs,
+        compilationType: 'real'
+      };
     }
   }
 }
