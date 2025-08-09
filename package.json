@@ -1,0 +1,44 @@
+{
+  "name": "websoroban-backend",
+  "version": "1.0.0",
+  "description": "Backend API for WebSoroban IDE",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "setup": "./setup.sh",
+    "build": "echo 'Backend build completed'",
+    "postinstall": "echo 'Post-install completed'",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@stellar/stellar-base": "^13.1.0",
+    "@stellar/stellar-sdk": "^13.3.0",
+    "body-parser": "^1.20.2",
+    "cors": "^2.8.5",
+    "dockerode": "^4.0.2",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "fs-extra": "^11.2.0",
+    "mongoose": "^8.0.3",
+    "multer": "^1.4.5-lts.1",
+    "node-fetch": "^3.3.2",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "stellar-sdk": "^13.3.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "keywords": [
+    "soroban",
+    "ide",
+    "rust",
+    "blockchain"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

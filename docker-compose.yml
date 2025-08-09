@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - MONGODB_URI=${MONGODB_URI:-mongodb://localhost:27017/soroban-ide}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./temp:/app/temp
+    depends_on:
+      - mongodb
+    restart: unless-stopped
+
+  compiler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: websoroban-compiler:latest
+    container_name: websoroban-compiler
+    volumes:
+      - ./temp:/workspace/temp
+    profiles:
+      - build-only
+
+  mongodb:
+    image: mongo:6.0
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=soroban-ide
+    volumes:
+      - mongodb_data:/data/db
+    restart: unless-stopped
+
+volumes:
+  mongodb_data:
+
+ 
