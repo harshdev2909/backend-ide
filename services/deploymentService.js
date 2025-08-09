@@ -31,8 +31,15 @@ class DeploymentService {
     } catch (error) {
       // Keypair doesn't exist, create it
       try {
-        await execAsync(`stellar keys generate --global ${this.defaultKeypairName} --network ${network}`);
-        console.log(`Created default keypair: ${this.defaultKeypairName}`);
+        if (network === 'testnet') {
+          // For testnet, create and fund the account automatically
+          await execAsync(`stellar keys generate --global ${this.defaultKeypairName} --network ${network} --fund`);
+          console.log(`Created and funded default keypair: ${this.defaultKeypairName}`);
+        } else {
+          // For mainnet, just create (don't auto-fund)
+          await execAsync(`stellar keys generate --global ${this.defaultKeypairName} --network ${network}`);
+          console.log(`Created default keypair: ${this.defaultKeypairName}`);
+        }
         return true;
       } catch (createError) {
         console.error(`Failed to create default keypair: ${createError.message}`);
@@ -208,6 +215,18 @@ class DeploymentService {
       if (!keypairExists) {
         log('error', 'Failed to ensure default keypair exists');
         throw new Error('Failed to create default keypair');
+      }
+
+      // For testnet, ensure the account has enough XLM for deployment
+      if (network === 'testnet') {
+        try {
+          log('info', 'Ensuring testnet account has sufficient XLM...');
+          await execAsync(`stellar keys fund ${this.defaultKeypairName} --network ${network}`);
+          log('info', 'Account funding verified/completed');
+        } catch (fundError) {
+          log('warning', `Account funding failed: ${fundError.message}`);
+          // Don't fail deployment - the account might already be funded
+        }
       }
 
       // Create project directory
