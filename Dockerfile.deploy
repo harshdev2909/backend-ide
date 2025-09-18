@@ -1,5 +1,5 @@
 # Multi-stage build to optimize memory usage
-FROM rust:1.85-slim as rust-builder
+FROM rust:1.89-slim as rust-builder
 
 # Install system dependencies for Rust compilation
 RUN apt-get update && apt-get install -y \
