@@ -1,9 +1,12 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
+const Job = require('../models/Job');
 const Project = require('../models/Project');
+const { addDeployJob } = require('../queues/deployQueue');
 const deploymentService = require('../services/deploymentService');
 
-// POST /api/deploy - Deploy a smart contract
+// POST /api/deploy - Deploy a smart contract (queued)
 router.post('/', async (req, res) => {
   try {
     const { projectId, wasmBase64, network = 'testnet', walletInfo } = req.body;
@@ -15,51 +18,52 @@ router.post('/', async (req, res) => {
       });
     }
 
-
-
-    // Deploy contract directly using the simplified service
-    const deploymentResult = await deploymentService.deployContract(projectId, wasmBase64, network, walletInfo);
+    // Generate MongoDB ObjectId first
+    const jobId = new mongoose.Types.ObjectId();
+    const jobIdString = jobId.toString();
+    const bullJobId = `deploy-${jobIdString}`;
     
-    // Update project with deployment info
-    if (deploymentResult.success && deploymentResult.contractAddress) {
-      try {
-        // Check if projectId is a valid MongoDB ObjectId
-        if (projectId.match(/^[0-9a-fA-F]{24}$/)) {
-          await Project.findByIdAndUpdate(projectId, {
-            lastDeployed: new Date(),
-            contractAddress: deploymentResult.contractAddress,
-            $push: {
-              deploymentHistory: {
-                timestamp: new Date(),
-                contractAddress: deploymentResult.contractAddress,
-                status: 'success',
-                logs: deploymentResult.logs.map(log => log.message)
-              }
-            }
-          });
-        }
-      } catch (updateError) {
-        console.warn('Could not update project:', updateError.message);
-        // Continue with deployment even if project update fails
-      }
+    // Enqueue deploy job (uses jobId to create BullMQ job ID)
+    const bullJob = await addDeployJob({
+      projectId,
+      wasmBase64,
+      network,
+      jobId: jobIdString,
+      walletInfo
+    });
+
+    // Verify BullMQ job was created
+    if (!bullJob || !bullJob.id) {
+      throw new Error('Failed to create BullMQ job');
     }
+
+    // Create job document in MongoDB with BullMQ job ID
+    const job = new Job({
+      _id: jobId,
+      type: 'deploy',
+      status: 'queued',
+      project: projectId,
+      bullJobId: bullJob.id || bullJobId
+    });
     
-    res.json({
-      success: deploymentResult.success,
-      contractAddress: deploymentResult.contractAddress,
-      network: deploymentResult.network,
-      projectId: deploymentResult.projectId,
-      walletAddress: deploymentResult.walletAddress,
-      keypairName: deploymentResult.keypairName,
-      logs: deploymentResult.logs,
-      deployed: deploymentResult.success,
-      isMock: deploymentResult.isMock || false
+    await job.save();
+
+    // Return 202 Accepted with job ID and initial logs
+    res.status(202).json({
+      success: true,
+      jobId: job._id.toString(),
+      message: 'Deployment job queued',
+      logs: [{
+        type: 'info',
+        message: 'Deployment job queued successfully',
+        timestamp: new Date().toISOString()
+      }]
     });
   } catch (error) {
-    console.error('Deployment error:', error);
+    console.error('Deployment queue error:', error);
     res.status(500).json({ 
       success: false,
-      error: 'Deployment failed',
+      error: 'Failed to queue deployment job',
       message: error.message
     });
   }

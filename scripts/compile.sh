@@ -23,6 +23,12 @@ fi
 
 cd /workspace/project
 
+# Ensure we're in a valid directory
+if [ ! -d "/workspace/project" ]; then
+    error "Cannot access project directory"
+    exit 1
+fi
+
 # Check for required files
 if [ ! -f "Cargo.toml" ]; then
     error "Cargo.toml not found"
@@ -36,6 +42,11 @@ fi
 
 # Create src directory if it doesn't exist
 mkdir -p src
+
+# Ensure target directory exists before compilation
+mkdir -p target/wasm32v1-none/release
+mkdir -p target/wasm32-unknown-unknown/release
+log "Ensured target directories exist"
 
 # Create .cargo directory and config if it doesn't exist
 mkdir -p .cargo

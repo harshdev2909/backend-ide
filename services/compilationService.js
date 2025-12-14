@@ -3,6 +3,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const os = require('os');
 const Docker = require('dockerode');
+const socketService = require('./socketService');
 
 class CompilationService {
   constructor() {
@@ -17,7 +18,8 @@ class CompilationService {
     }
   }
 
-  async compileProject(projectId, files) {
+  async compileProject(projectId, files, onLogUpdate = null, jobId = null) {
+    console.log(`[CompilationService] compileProject called with jobId: ${jobId}, projectId: ${projectId}`);
     const projectDir = path.join(this.tempDir, projectId);
     
     try {
@@ -42,6 +44,27 @@ class CompilationService {
         };
         logs.push(logEntry);
         console.log(`[${type.toUpperCase()}] ${message}`);
+        
+        // Emit log via WebSocket if jobId provided
+        if (jobId) {
+          console.log(`[CompilationService] Emitting log for job ${jobId}:`, logEntry.message);
+          try {
+            socketService.emitLog(jobId, logEntry);
+            console.log(`[CompilationService] Successfully emitted log for job ${jobId}`);
+          } catch (err) {
+            console.error(`[CompilationService] Error emitting log for job ${jobId}:`, err);
+          }
+        } else {
+          console.warn(`[CompilationService] No jobId provided, cannot emit log via WebSocket. jobId: ${jobId}, type: ${typeof jobId}`);
+        }
+        
+        // Update job with logs incrementally if callback provided
+        if (onLogUpdate && typeof onLogUpdate === 'function') {
+          // Call callback to update job with current logs
+          onLogUpdate([...logs]).catch(err => {
+            console.error('Error updating job logs:', err);
+          });
+        }
       };
 
       log('info', 'Starting real Rust compilation...');
@@ -49,7 +72,7 @@ class CompilationService {
       // Try real compilation with Stellar CLI first
       try {
         log('info', 'Attempting real Rust compilation with Stellar CLI...');
-        const realResult = await this.realStellarCompilation(projectDir, logs);
+        const realResult = await this.realStellarCompilation(projectDir, logs, log);
         if (realResult.success) {
           return realResult;
         }
@@ -102,43 +125,53 @@ class CompilationService {
       await container.start();
       log('info', 'Docker container started for real Rust compilation');
 
+      // Track which logs we've already processed to avoid duplicates
+      let processedLogCount = 0;
+      
       // Get container logs in real-time using polling
       const pollLogs = async () => {
         try {
           const containerLogs = await container.logs({
             stdout: true,
             stderr: true,
-            timestamps: true
+            timestamps: true,
+            tail: 1000 // Get last 1000 lines
           });
           
           const lines = containerLogs.toString().split('\n').filter(line => line.trim());
           
-          for (const line of lines) {
+          // Only process new lines
+          const newLines = lines.slice(processedLogCount);
+          processedLogCount = lines.length;
+          
+          for (const line of newLines) {
             try {
               // Remove timestamp prefix if present
               const cleanLine = line.replace(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z /, '');
               
-              // Try to parse as JSON first
+              // Try to parse as JSON first (from compile.sh script)
               try {
                 const logEntry = JSON.parse(cleanLine);
-                logs.push(logEntry);
+                log(logEntry.type || 'info', logEntry.message || cleanLine);
               } catch (e) {
-                // Also add to logs array
-                const logEntry = {
-                  type: 'info',
-                  message: cleanLine,
-                  timestamp: new Date().toISOString()
-                };
-                logs.push(logEntry);
+                // Not JSON, treat as regular log line
+                // Detect log type from content
+                const lowerLine = cleanLine.toLowerCase();
+                if (lowerLine.includes('error') || lowerLine.includes('failed') || lowerLine.includes('❌')) {
+                  log('error', cleanLine);
+                } else if (lowerLine.includes('warning') || lowerLine.includes('⚠')) {
+                  log('warning', cleanLine);
+                } else if (lowerLine.includes('success') || lowerLine.includes('✅') || lowerLine.includes('finished')) {
+                  log('success', cleanLine);
+                } else if (lowerLine.includes('compiling') || lowerLine.includes('building') || lowerLine.includes('updating')) {
+                  log('info', cleanLine);
+                } else {
+                  log('info', cleanLine);
+                }
               }
             } catch (e) {
               // If parsing fails, treat as info log
-              const logEntry = {
-                type: 'info',
-                message: line,
-                timestamp: new Date().toISOString()
-              };
-              logs.push(logEntry);
+              log('info', line);
             }
           }
         } catch (error) {
@@ -313,11 +346,12 @@ class CompilationService {
     }
   }
 
-  async realStellarCompilation(projectDir, logs) {
+  async realStellarCompilation(projectDir, logs, logFn = null) {
     const { promisify } = require('util');
     const execAsync = promisify(exec);
     
-    const log = (type, message) => {
+    // Use provided log function or create a local one
+    const log = logFn || ((type, message) => {
       const logEntry = {
         type,
         message,
@@ -325,7 +359,7 @@ class CompilationService {
       };
       logs.push(logEntry);
       console.log(`[${type.toUpperCase()}] ${message}`);
-    };
+    });
 
     try {
       // Check if stellar CLI is available
@@ -407,21 +441,147 @@ class CompilationService {
         }
       }
       
+      // Ensure build directory exists and is accessible
+      await fs.ensureDir(buildDir);
+      const buildDirExists = await fs.pathExists(buildDir);
+      if (!buildDirExists) {
+        throw new Error(`Build directory does not exist: ${buildDir}`);
+      }
+      
+      // Ensure target directory exists before compilation
+      const targetDir = path.join(buildDir, 'target');
+      await fs.ensureDir(targetDir);
+      await fs.ensureDir(path.join(targetDir, 'wasm32v1-none', 'release'));
+      await fs.ensureDir(path.join(targetDir, 'wasm32-unknown-unknown', 'release'));
+      log('info', 'Ensured target directories exist');
+      
+      // Verify we can write to the directory
+      try {
+        const testFile = path.join(buildDir, '.test-write');
+        await fs.writeFile(testFile, 'test');
+        await fs.remove(testFile);
+      } catch (writeError) {
+        throw new Error(`Cannot write to build directory: ${writeError.message}`);
+      }
+      
       // Change to build directory and run stellar contract build
       log('info', `Building contract with Stellar CLI from: ${path.relative(projectDir, buildDir)}`);
-      const { stdout, stderr } = await execAsync('stellar contract build', { cwd: buildDir });
       
-      // Check for actual compilation errors (not just stderr output)
-      if (stderr && (stderr.includes('error:') || stderr.includes('failed')) && !stderr.includes('Build Complete')) {
-        throw new Error(stderr);
-      }
-      
-      log('info', 'Stellar CLI build output:');
-      if (stdout) {
-        stdout.split('\n').forEach(line => {
-          if (line.trim()) log('info', line.trim());
+      // Use spawn to capture output line by line for real-time logging
+      return new Promise((resolve, reject) => {
+        const { spawn } = require('child_process');
+        const buildProcess = spawn('stellar', ['contract', 'build'], {
+          cwd: buildDir,
+          env: { 
+            ...process.env, 
+            CARGO_TARGET_DIR: targetDir,
+            HOME: buildDir,
+            USER: 'root'
+          },
+          stdio: ['ignore', 'pipe', 'pipe']
         });
-      }
+        
+        let hasError = false;
+        let errorOutput = '';
+        
+        // Capture stdout line by line
+        buildProcess.stdout.on('data', (data) => {
+          const lines = data.toString().split('\n');
+          lines.forEach(line => {
+            const trimmed = line.trim();
+            if (trimmed) {
+              const lower = trimmed.toLowerCase();
+              if (lower.includes('error') || lower.includes('failed')) {
+                log('error', trimmed);
+                hasError = true;
+                errorOutput += trimmed + '\n';
+              } else if (lower.includes('warning')) {
+                log('warning', trimmed);
+              } else if (lower.includes('compiling') || lower.includes('building') || lower.includes('updating') || lower.includes('finished')) {
+                log('info', trimmed);
+              } else {
+                log('info', trimmed);
+              }
+            }
+          });
+        });
+        
+        // Capture stderr line by line
+        buildProcess.stderr.on('data', (data) => {
+          const lines = data.toString().split('\n');
+          lines.forEach(line => {
+            const trimmed = line.trim();
+            if (trimmed && !trimmed.includes('Build Complete')) {
+              const lower = trimmed.toLowerCase();
+              if (lower.includes('error') || lower.includes('failed')) {
+                log('error', trimmed);
+                hasError = true;
+                errorOutput += trimmed + '\n';
+              } else {
+                log('info', trimmed);
+              }
+            }
+          });
+        });
+        
+        buildProcess.on('close', async (code) => {
+          if (code !== 0 || hasError) {
+            reject(new Error(errorOutput || `Build process exited with code ${code}`));
+            return;
+          }
+          
+          // Continue with WASM file detection
+          try {
+            // Look for the compiled WASM file
+            let wasmFiles = [];
+            let targetDir = '';
+            
+            // First try the newer wasm32v1-none target
+            const newTargetPath = path.join(buildDir, 'target', 'wasm32v1-none', 'release');
+            if (await fs.pathExists(newTargetPath)) {
+              wasmFiles = await fs.readdir(newTargetPath).catch(() => []);
+              targetDir = newTargetPath;
+            }
+            
+            // Fall back to older wasm32-unknown-unknown target if no files found
+            if (wasmFiles.length === 0) {
+              const oldTargetPath = path.join(buildDir, 'target', 'wasm32-unknown-unknown', 'release');
+              if (await fs.pathExists(oldTargetPath)) {
+                wasmFiles = await fs.readdir(oldTargetPath).catch(() => []);
+                targetDir = oldTargetPath;
+              }
+            }
+            
+            const wasmFile = wasmFiles.find(f => f.endsWith('.wasm') && !f.includes('deps'));
+            
+            if (wasmFile) {
+              const wasmPath = path.join(targetDir, wasmFile);
+              const wasmContent = await fs.readFile(wasmPath);
+              
+              log('success', `Real compilation successful! Generated ${wasmFile} (${wasmContent.length} bytes)`);
+              
+              resolve({
+                success: true,
+                output: {
+                  wasm: wasmContent.toString('base64'),
+                  wasmFile: wasmFile
+                },
+                logs: logs,
+                compilationType: 'real'
+              });
+            } else {
+              reject(new Error('No WASM file generated'));
+            }
+          } catch (error) {
+            reject(error);
+          }
+        });
+        
+        buildProcess.on('error', (err) => {
+          log('error', `Build process error: ${err.message}`);
+          reject(err);
+        });
+      });
       
       // Look for the compiled WASM file in the build directory
       // Try both newer (wasm32v1-none) and older (wasm32-unknown-unknown) target directories
@@ -473,6 +633,27 @@ class CompilationService {
       
     } catch (error) {
       log('error', `Real compilation failed: ${error.message}`);
+      
+      // Capture stderr if available
+      if (error.stderr) {
+        error.stderr.split('\n').forEach(line => {
+          const trimmed = line.trim();
+          if (trimmed) {
+            log('error', trimmed);
+          }
+        });
+      }
+      
+      // Capture stdout if available (sometimes errors are in stdout)
+      if (error.stdout) {
+        error.stdout.split('\n').forEach(line => {
+          const trimmed = line.trim();
+          if (trimmed && (trimmed.toLowerCase().includes('error') || trimmed.toLowerCase().includes('failed'))) {
+            log('error', trimmed);
+          }
+        });
+      }
+      
       return {
         success: false,
         error: error.message,

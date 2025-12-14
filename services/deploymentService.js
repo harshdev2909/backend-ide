@@ -4,6 +4,7 @@ const path = require('path');
 const os = require('os');
 const util = require('util');
 const execAsync = util.promisify(exec);
+const socketService = require('./socketService');
 
 // Check if Stellar CLI is available
 let stellarAvailable = false;
@@ -179,7 +180,7 @@ class DeploymentService {
   /**
    * Deploy a smart contract to Stellar testnet
    */
-  async deployContract(projectId, wasmBase64, network = 'testnet', walletInfo = null) {
+  async deployContract(projectId, wasmBase64, network = 'testnet', walletInfo = null, onLogUpdate = null, jobId = null) {
     const logs = [];
     
     const log = (type, message) => {
@@ -191,7 +192,21 @@ class DeploymentService {
       logs.push(logEntry);
       console.log(`[${type.toUpperCase()}] ${message}`);
       
+      // Emit log via WebSocket if jobId provided
+      if (jobId) {
+        console.log(`[DeploymentService] Emitting log for job ${jobId}:`, logEntry.message);
+        socketService.emitLog(jobId, logEntry);
+      } else {
+        console.warn('[DeploymentService] No jobId provided, cannot emit log via WebSocket');
+      }
       
+      // Update job with logs incrementally if callback provided
+      if (onLogUpdate && typeof onLogUpdate === 'function') {
+        // Call callback to update job with current logs
+        onLogUpdate([...logs]).catch(err => {
+          console.error('Error updating deployment job logs:', err);
+        });
+      }
     };
     
     try {
@@ -272,14 +287,7 @@ class DeploymentService {
         throw new Error(`Keypair not accessible: ${keypairError.message}`);
       }
 
-      // Check account balance before deployment
-      try {
-        const { stdout: balanceOutput } = await execAsync(`stellar account show ${walletAddress} --network ${network}`);
-        log('info', 'Account balance verified');
-      } catch (balanceError) {
-        log('warning', `Could not verify account balance: ${balanceError.message}`);
-        log('info', 'Proceeding with deployment...');
-      }
+      
 
       // Deploy the contract
       log('info', 'Deploying contract...');
@@ -307,7 +315,22 @@ class DeploymentService {
         const output = data.toString();
         deployOutput += output;
         
-
+        // Log each line in real-time
+        output.split('\n').forEach(line => {
+          const trimmed = line.trim();
+          if (trimmed) {
+            const lower = trimmed.toLowerCase();
+            if (lower.includes('error') || lower.includes('failed')) {
+              log('error', trimmed);
+            } else if (lower.includes('warning')) {
+              log('warning', trimmed);
+            } else if (lower.includes('success') || lower.includes('deployed') || lower.includes('contract')) {
+              log('success', trimmed);
+            } else {
+              log('info', trimmed);
+            }
+          }
+        });
       });
 
       // Stream stderr in real-time
@@ -315,7 +338,18 @@ class DeploymentService {
         const error = data.toString();
         deployError += error;
         
-
+        // Log each line in real-time
+        error.split('\n').forEach(line => {
+          const trimmed = line.trim();
+          if (trimmed && !trimmed.includes('Build Complete')) {
+            const lower = trimmed.toLowerCase();
+            if (lower.includes('error') || lower.includes('failed')) {
+              log('error', trimmed);
+            } else {
+              log('warning', trimmed);
+            }
+          }
+        });
       });
 
       // Wait for deployment to complete
