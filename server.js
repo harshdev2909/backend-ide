@@ -8,10 +8,35 @@ require('dotenv').config();
 const app = express();
 const server = http.createServer(app);
 
+// Allowed frontend origins (hardcoded)
+const allowedOrigins = [
+  "https://web-soroban.vercel.app",
+  "https://websoroban.in",
+  "http://localhost:3000" // Keep localhost for local development
+];
+
+// CORS validation function
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+};
+
 // Socket.IO setup with CORS
 const io = new Server(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -24,8 +49,8 @@ global.io = io;
 const socketService = require('./services/socketService');
 socketService.init(io);
 
-// Middleware
-app.use(cors());
+// Middleware - CORS configuration
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // MongoDB connection
@@ -73,7 +98,7 @@ const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Socket.IO server initialized`);
-  console.log(`Socket.IO CORS origin: ${process.env.FRONTEND_URL || "http://localhost:3000"}`);
+  console.log(`CORS allowed origins: ${allowedOrigins.join(', ')}`);
   console.log(`MongoDB URI: ${MONGODB_URI}`);
   
   // Verify Socket.IO is working
