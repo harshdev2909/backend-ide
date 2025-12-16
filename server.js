@@ -30,10 +30,7 @@ app.use(express.json());
 
 // MongoDB connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/soroban-ide';
-mongoose.connect(MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
+mongoose.connect(MONGODB_URI);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

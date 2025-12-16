@@ -123,10 +123,7 @@ async function processCompileJob(job) {
 }
 
 // Connect to MongoDB
-mongoose.connect(MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-}).then(() => {
+mongoose.connect(MONGODB_URI).then(() => {
   console.log(`[CompileWorker] Connected to MongoDB: ${MONGODB_URI}`);
 }).catch((error) => {
   console.error('[CompileWorker] MongoDB connection error:', error);

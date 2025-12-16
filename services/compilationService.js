@@ -583,54 +583,6 @@ class CompilationService {
         });
       });
       
-      // Look for the compiled WASM file in the build directory
-      // Try both newer (wasm32v1-none) and older (wasm32-unknown-unknown) target directories
-      let wasmFiles = [];
-      let targetDir = '';
-      
-      // First try the newer wasm32v1-none target
-      const newTargetPath = path.join(buildDir, 'target', 'wasm32v1-none', 'release');
-      log('info', `Checking for WASM files in: ${newTargetPath}`);
-      if (await fs.pathExists(newTargetPath)) {
-        wasmFiles = await fs.readdir(newTargetPath).catch(() => []);
-        targetDir = newTargetPath;
-        log('info', `Using wasm32v1-none target directory, found ${wasmFiles.length} files: ${wasmFiles.join(', ')}`);
-      }
-      
-      // Fall back to older wasm32-unknown-unknown target if no files found
-      if (wasmFiles.length === 0) {
-        const oldTargetPath = path.join(buildDir, 'target', 'wasm32-unknown-unknown', 'release');
-        if (await fs.pathExists(oldTargetPath)) {
-          wasmFiles = await fs.readdir(oldTargetPath).catch(() => []);
-          targetDir = oldTargetPath;
-          log('info', 'Using wasm32-unknown-unknown target directory');
-        }
-      }
-      
-      const wasmFile = wasmFiles.find(f => f.endsWith('.wasm') && !f.includes('deps'));
-      
-      if (wasmFile) {
-        const wasmPath = path.join(targetDir, wasmFile);
-        const wasmContent = await fs.readFile(wasmPath);
-        
-        log('success', `Real compilation successful! Generated ${wasmFile} (${wasmContent.length} bytes)`);
-        
-        const result = {
-          success: true,
-          output: {
-            wasm: wasmContent.toString('base64'),
-            wasmFile: wasmFile
-          },
-          logs: logs,
-          compilationType: 'real'
-        };
-        
-        log('info', `Returning success result with ${result.output.wasm.length} chars of base64 WASM data`);
-        return result;
-      } else {
-        throw new Error('No WASM file generated');
-      }
-      
     } catch (error) {
       log('error', `Real compilation failed: ${error.message}`);
       

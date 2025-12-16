@@ -37,7 +37,7 @@ const jobSchema = new mongoose.Schema({
 // Index for faster queries
 jobSchema.index({ project: 1, createdAt: -1 });
 jobSchema.index({ status: 1, createdAt: -1 });
-jobSchema.index({ bullJobId: 1 });
+// Note: bullJobId index is automatically created by unique: true
 
 module.exports = mongoose.model('Job', jobSchema);
 

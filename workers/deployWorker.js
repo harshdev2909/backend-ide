@@ -148,10 +148,7 @@ async function processDeployJob(job) {
 }
 
 // Connect to MongoDB
-mongoose.connect(MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-}).then(() => {
+mongoose.connect(MONGODB_URI).then(() => {
   console.log(`[DeployWorker] Connected to MongoDB: ${MONGODB_URI}`);
 }).catch((error) => {
   console.error('[DeployWorker] MongoDB connection error:', error);
