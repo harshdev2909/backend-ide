@@ -73,12 +73,21 @@ class CompilationService {
       try {
         log('info', 'Attempting real Rust compilation with Stellar CLI...');
         const realResult = await this.realStellarCompilation(projectDir, logs, log);
-        if (realResult.success) {
-          return realResult;
+        if (realResult && realResult.success) {
+          log('success', 'Stellar CLI compilation succeeded!');
+          return {
+            success: true,
+            logs: realResult.logs || logs,
+            wasmBase64: realResult.output?.wasm,
+            wasmUrl: realResult.output?.wasm ? `data:application/wasm;base64,${realResult.output.wasm}` : undefined
+          };
         }
-        log('warning', 'Stellar CLI compilation failed, trying Docker...');
+        log('warning', `Stellar CLI compilation returned success=false: ${realResult?.error || 'unknown error'}`);
+        log('warning', 'Trying Docker fallback...');
       } catch (error) {
-        log('warning', 'Stellar CLI not available, trying Docker...');
+        log('warning', `Stellar CLI compilation error: ${error.message}`);
+        log('warning', `Error stack: ${error.stack}`);
+        log('warning', 'Trying Docker fallback...');
       }
 
       // Check if Docker is available
@@ -484,6 +493,25 @@ class CompilationService {
         let hasError = false;
         let errorOutput = '';
         
+        // Helper function to detect actual errors (not compilation messages)
+        const isActualError = (line) => {
+          const lower = line.toLowerCase();
+          // Ignore compilation messages that contain "error" in package names (e.g., "Compiling thiserror")
+          if (lower.startsWith('compiling ') || lower.startsWith('adding ') || lower.startsWith('updating ')) {
+            return false;
+          }
+          // Check for actual error patterns
+          return (
+            lower.includes('error:') ||
+            lower.includes('error ') ||
+            lower.startsWith('error') ||
+            lower.includes('failed to') ||
+            lower.includes('failed:') ||
+            lower.includes('fatal:') ||
+            lower.includes('cannot') && (lower.includes('find') || lower.includes('open') || lower.includes('read'))
+          );
+        };
+        
         // Capture stdout line by line
         buildProcess.stdout.on('data', (data) => {
           const lines = data.toString().split('\n');
@@ -491,7 +519,7 @@ class CompilationService {
             const trimmed = line.trim();
             if (trimmed) {
               const lower = trimmed.toLowerCase();
-              if (lower.includes('error') || lower.includes('failed')) {
+              if (isActualError(trimmed)) {
                 log('error', trimmed);
                 hasError = true;
                 errorOutput += trimmed + '\n';
@@ -513,10 +541,14 @@ class CompilationService {
             const trimmed = line.trim();
             if (trimmed && !trimmed.includes('Build Complete')) {
               const lower = trimmed.toLowerCase();
-              if (lower.includes('error') || lower.includes('failed')) {
+              // stderr often contains compilation progress, so be more lenient
+              if (isActualError(trimmed)) {
                 log('error', trimmed);
                 hasError = true;
                 errorOutput += trimmed + '\n';
+              } else if (lower.startsWith('compiling ') || lower.startsWith('adding ') || lower.startsWith('updating ')) {
+                // These are normal compilation messages on stderr
+                log('info', trimmed);
               } else {
                 log('info', trimmed);
               }
@@ -525,9 +557,18 @@ class CompilationService {
         });
         
         buildProcess.on('close', async (code) => {
-          if (code !== 0 || hasError) {
-            reject(new Error(errorOutput || `Build process exited with code ${code}`));
+          // Only reject if exit code is non-zero
+          // hasError might be false positive from package names containing "error"
+          if (code !== 0) {
+            const errorMsg = errorOutput || `Build process exited with code ${code}`;
+            log('error', `Build failed with exit code ${code}: ${errorMsg}`);
+            reject(new Error(errorMsg));
             return;
+          }
+          
+          // Log if we detected errors but exit code was 0 (might be false positives)
+          if (hasError && errorOutput) {
+            log('warning', `Some error-like messages detected but build succeeded: ${errorOutput.substring(0, 200)}`);
           }
           
           // Continue with WASM file detection
@@ -538,24 +579,40 @@ class CompilationService {
             
             // First try the newer wasm32v1-none target
             const newTargetPath = path.join(buildDir, 'target', 'wasm32v1-none', 'release');
+            log('info', `Checking for WASM files in: ${newTargetPath}`);
             if (await fs.pathExists(newTargetPath)) {
-              wasmFiles = await fs.readdir(newTargetPath).catch(() => []);
+              wasmFiles = await fs.readdir(newTargetPath).catch((err) => {
+                log('warning', `Error reading directory ${newTargetPath}: ${err.message}`);
+                return [];
+              });
               targetDir = newTargetPath;
+              log('info', `Found ${wasmFiles.length} files in wasm32v1-none/release: ${wasmFiles.join(', ')}`);
+            } else {
+              log('warning', `Directory does not exist: ${newTargetPath}`);
             }
             
             // Fall back to older wasm32-unknown-unknown target if no files found
             if (wasmFiles.length === 0) {
               const oldTargetPath = path.join(buildDir, 'target', 'wasm32-unknown-unknown', 'release');
+              log('info', `Checking fallback directory: ${oldTargetPath}`);
               if (await fs.pathExists(oldTargetPath)) {
-                wasmFiles = await fs.readdir(oldTargetPath).catch(() => []);
+                wasmFiles = await fs.readdir(oldTargetPath).catch((err) => {
+                  log('warning', `Error reading directory ${oldTargetPath}: ${err.message}`);
+                  return [];
+                });
                 targetDir = oldTargetPath;
+                log('info', `Found ${wasmFiles.length} files in wasm32-unknown-unknown/release: ${wasmFiles.join(', ')}`);
+              } else {
+                log('warning', `Fallback directory does not exist: ${oldTargetPath}`);
               }
             }
             
+            // Filter for WASM files (excluding deps)
             const wasmFile = wasmFiles.find(f => f.endsWith('.wasm') && !f.includes('deps'));
             
             if (wasmFile) {
               const wasmPath = path.join(targetDir, wasmFile);
+              log('info', `Reading WASM file from: ${wasmPath}`);
               const wasmContent = await fs.readFile(wasmPath);
               
               log('success', `Real compilation successful! Generated ${wasmFile} (${wasmContent.length} bytes)`);
@@ -570,9 +627,14 @@ class CompilationService {
                 compilationType: 'real'
               });
             } else {
-              reject(new Error('No WASM file generated'));
+              log('error', `No WASM file found. Available files: ${wasmFiles.join(', ')}`);
+              log('error', `Build directory: ${buildDir}`);
+              log('error', `Target directory: ${targetDir}`);
+              reject(new Error(`No WASM file generated. Found files: ${wasmFiles.join(', ')}`));
             }
           } catch (error) {
+            log('error', `Error during WASM file detection: ${error.message}`);
+            log('error', `Stack: ${error.stack}`);
             reject(error);
           }
         });
