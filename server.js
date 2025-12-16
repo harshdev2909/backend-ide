@@ -19,18 +19,30 @@ const allowedOrigins = [
 const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
+    if (!origin) {
+      console.log('[CORS] Request with no origin - allowing');
+      return callback(null, true);
+    }
     
-    // Check if origin is in allowed list
-    if (allowedOrigins.includes(origin)) {
+    console.log(`[CORS] Request from origin: ${origin}`);
+    
+    // Normalize origin (remove trailing slash, www, etc.)
+    const normalizedOrigin = origin.replace(/\/$/, ''); // Remove trailing slash
+    
+    // Check if origin is in allowed list (exact match or normalized)
+    if (allowedOrigins.includes(origin) || allowedOrigins.includes(normalizedOrigin)) {
+      console.log(`[CORS] Origin allowed: ${origin}`);
       callback(null, true);
     } else {
-      callback(new Error('Not allowed by CORS'));
+      console.log(`[CORS] Origin NOT allowed: ${origin}`);
+      console.log(`[CORS] Allowed origins: ${allowedOrigins.join(', ')}`);
+      callback(new Error(`Not allowed by CORS. Origin: ${origin}`));
     }
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  allowedHeaders: ["Content-Type", "Authorization"],
+  exposedHeaders: ["Content-Type"]
 };
 
 // Socket.IO setup with CORS
@@ -48,6 +60,12 @@ global.io = io;
 // Initialize socket service
 const socketService = require('./services/socketService');
 socketService.init(io);
+
+// Request logging middleware (for debugging)
+app.use((req, res, next) => {
+  console.log(`[Request] ${req.method} ${req.path} - Origin: ${req.headers.origin || 'none'}`);
+  next();
+});
 
 // Middleware - CORS configuration
 app.use(cors(corsOptions));
