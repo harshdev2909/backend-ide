@@ -12,6 +12,7 @@ const server = http.createServer(app);
 const allowedOrigins = [
   "https://web-soroban.vercel.app",
   "https://websoroban.in",
+  "https://www.websoroban.in",
   "http://localhost:3000" // Keep localhost for local development
 ];
 
