@@ -53,14 +53,14 @@ async function processDeployJob(job) {
     
     // Update job with result
     const jobResult = {
-      success: result.success,
-      contractAddress: result.contractAddress,
-      network: result.network,
-      projectId: result.projectId,
-      walletAddress: result.walletAddress,
-      keypairName: result.keypairName,
-      logs: result.logs,
-      error: result.error
+        success: result.success,
+        contractAddress: result.contractAddress,
+        network: result.network,
+        projectId: result.projectId,
+        walletAddress: result.walletAddress,
+        keypairName: result.keypairName,
+        logs: result.logs,
+        error: result.error
     };
     
     await Job.findByIdAndUpdate(jobId, {

@@ -90,6 +90,7 @@ app.use('/api/compile', require('./routes/compile'));
 app.use('/api/deploy', require('./routes/deploy'));
 app.use('/api/templates', require('./routes/templates'));
 app.use('/api/jobs', require('./routes/jobs'));
+app.use('/api/invites', require('./routes/invites'));
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
@@ -112,12 +113,36 @@ io.on('connection', (socket) => {
   });
 });
 
+// Error handling middleware (must be after routes)
+app.use((err, req, res, next) => {
+  console.error('[Error]', err);
+  res.status(err.status || 500).json({
+    success: false,
+    error: err.message || 'Internal server error'
+  });
+});
+
+// 404 handler for API routes
+app.use('/api/*', (req, res) => {
+  console.log(`[404] Route not found: ${req.method} ${req.path}`);
+  res.status(404).json({
+    success: false,
+    error: `Route not found: ${req.method} ${req.path}`
+  });
+});
+
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
   console.log(`Socket.IO server initialized`);
   console.log(`CORS allowed origins: ${allowedOrigins.join(', ')}`);
   console.log(`MongoDB URI: ${MONGODB_URI}`);
+  console.log(`Available routes:`);
+  console.log(`  - GET  /api/health`);
+  console.log(`  - POST /api/invites/check`);
+  console.log(`  - POST /api/invites/validate`);
+  console.log(`  - POST /api/invites/send`);
+  console.log(`  - GET  /api/invites`);
   
   // Verify Socket.IO is working
   console.log(`Socket.IO namespace: ${io.name}`);

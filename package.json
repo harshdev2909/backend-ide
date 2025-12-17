@@ -11,6 +11,7 @@
     "setup": "./setup.sh",
     "build": "echo 'Backend build completed'",
     "postinstall": "echo 'Post-install completed'",
+    "generate-invites": "node scripts/generate-invites.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
@@ -27,6 +28,7 @@
     "mongoose": "^8.0.3",
     "multer": "^2.0.1",
     "node-fetch": "^3.3.2",
+    "nodemailer": "^6.9.8",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1"
   },

@@ -53,12 +53,12 @@ async function processCompileJob(job) {
     
     // Update job with result
     const jobResult = {
-      success: result.success,
-      logs: result.logs,
-      wasmBase64: result.wasmBase64 || result.output?.wasm,
-      wasmFile: result.output?.wasmFile,
-      compilationType: result.compilationType,
-      error: result.error
+        success: result.success,
+        logs: result.logs,
+        wasmBase64: result.wasmBase64 || result.output?.wasm,
+        wasmFile: result.output?.wasmFile,
+        compilationType: result.compilationType,
+        error: result.error
     };
     
     await Job.findByIdAndUpdate(jobId, {

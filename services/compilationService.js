@@ -136,7 +136,7 @@ class CompilationService {
 
       // Track which logs we've already processed to avoid duplicates
       let processedLogCount = 0;
-      
+
       // Get container logs in real-time using polling
       const pollLogs = async () => {
         try {
@@ -553,7 +553,7 @@ class CompilationService {
                 log('info', trimmed);
               }
             }
-          });
+        });
         });
         
         buildProcess.on('close', async (code) => {
@@ -574,57 +574,57 @@ class CompilationService {
           // Continue with WASM file detection
           try {
             // Look for the compiled WASM file
-            let wasmFiles = [];
-            let targetDir = '';
-            
-            // First try the newer wasm32v1-none target
-            const newTargetPath = path.join(buildDir, 'target', 'wasm32v1-none', 'release');
-            log('info', `Checking for WASM files in: ${newTargetPath}`);
-            if (await fs.pathExists(newTargetPath)) {
+      let wasmFiles = [];
+      let targetDir = '';
+      
+      // First try the newer wasm32v1-none target
+      const newTargetPath = path.join(buildDir, 'target', 'wasm32v1-none', 'release');
+      log('info', `Checking for WASM files in: ${newTargetPath}`);
+      if (await fs.pathExists(newTargetPath)) {
               wasmFiles = await fs.readdir(newTargetPath).catch((err) => {
                 log('warning', `Error reading directory ${newTargetPath}: ${err.message}`);
                 return [];
               });
-              targetDir = newTargetPath;
+        targetDir = newTargetPath;
               log('info', `Found ${wasmFiles.length} files in wasm32v1-none/release: ${wasmFiles.join(', ')}`);
             } else {
               log('warning', `Directory does not exist: ${newTargetPath}`);
-            }
-            
-            // Fall back to older wasm32-unknown-unknown target if no files found
-            if (wasmFiles.length === 0) {
-              const oldTargetPath = path.join(buildDir, 'target', 'wasm32-unknown-unknown', 'release');
+      }
+      
+      // Fall back to older wasm32-unknown-unknown target if no files found
+      if (wasmFiles.length === 0) {
+        const oldTargetPath = path.join(buildDir, 'target', 'wasm32-unknown-unknown', 'release');
               log('info', `Checking fallback directory: ${oldTargetPath}`);
-              if (await fs.pathExists(oldTargetPath)) {
+        if (await fs.pathExists(oldTargetPath)) {
                 wasmFiles = await fs.readdir(oldTargetPath).catch((err) => {
                   log('warning', `Error reading directory ${oldTargetPath}: ${err.message}`);
                   return [];
                 });
-                targetDir = oldTargetPath;
+          targetDir = oldTargetPath;
                 log('info', `Found ${wasmFiles.length} files in wasm32-unknown-unknown/release: ${wasmFiles.join(', ')}`);
               } else {
                 log('warning', `Fallback directory does not exist: ${oldTargetPath}`);
-              }
-            }
-            
+        }
+      }
+      
             // Filter for WASM files (excluding deps)
-            const wasmFile = wasmFiles.find(f => f.endsWith('.wasm') && !f.includes('deps'));
-            
-            if (wasmFile) {
-              const wasmPath = path.join(targetDir, wasmFile);
+      const wasmFile = wasmFiles.find(f => f.endsWith('.wasm') && !f.includes('deps'));
+      
+      if (wasmFile) {
+        const wasmPath = path.join(targetDir, wasmFile);
               log('info', `Reading WASM file from: ${wasmPath}`);
-              const wasmContent = await fs.readFile(wasmPath);
-              
-              log('success', `Real compilation successful! Generated ${wasmFile} (${wasmContent.length} bytes)`);
-              
+        const wasmContent = await fs.readFile(wasmPath);
+        
+        log('success', `Real compilation successful! Generated ${wasmFile} (${wasmContent.length} bytes)`);
+        
               resolve({
-                success: true,
-                output: {
-                  wasm: wasmContent.toString('base64'),
-                  wasmFile: wasmFile
-                },
-                logs: logs,
-                compilationType: 'real'
+          success: true,
+          output: {
+            wasm: wasmContent.toString('base64'),
+            wasmFile: wasmFile
+          },
+          logs: logs,
+          compilationType: 'real'
               });
             } else {
               log('error', `No WASM file found. Available files: ${wasmFiles.join(', ')}`);

@@ -22,7 +22,7 @@ router.post('/', async (req, res) => {
     const jobId = new mongoose.Types.ObjectId();
     const jobIdString = jobId.toString();
     const bullJobId = `deploy-${jobIdString}`;
-    
+
     // Enqueue deploy job (uses jobId to create BullMQ job ID)
     const bullJob = await addDeployJob({
       projectId,
