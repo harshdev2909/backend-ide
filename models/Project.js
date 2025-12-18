@@ -50,7 +50,11 @@ const projectSchema = new mongoose.Schema({
       default: 'success'
     },
     logs: [String]
-  }]
+  }],
+  isLocal: {
+    type: Boolean,
+    default: false
+  }
 }, {
   timestamps: true
 });

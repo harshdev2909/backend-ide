@@ -219,8 +219,7 @@ router.post('/validate', async (req, res) => {
       });
     }
 
-    // Normalize both codes for comparison (uppercase, trim, remove extra spaces)
-    // Note: We allow re-validation of used codes - just verify the code matches
+    
     const storedCodeNormalized = (emailInvite.inviteCode || '').toUpperCase().trim().replace(/\s+/g, '');
     const providedCodeNormalized = normalizedCode.replace(/\s+/g, '');
 

@@ -2,10 +2,11 @@ const express = require('express');
 const router = express.Router();
 const Project = require('../models/Project');
 
-// GET /api/projects - List all projects
+// GET /api/projects - List all projects (exclude local projects)
 router.get('/', async (req, res) => {
   try {
-    const projects = await Project.find().sort({ updatedAt: -1 });
+    // Exclude projects marked as local (private projects not shown in list)
+    const projects = await Project.find({ isLocal: { $ne: true } }).sort({ updatedAt: -1 });
     res.json(projects);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch projects' });
@@ -15,11 +16,53 @@ router.get('/', async (req, res) => {
 // POST /api/projects - Create new project
 router.post('/', async (req, res) => {
   try {
-    const { name, files, template } = req.body;
+    const { name, files, template, isLocal } = req.body;
     
     let defaultFiles;
+    const projectName = name || 'Untitled Project';
+    // Convert project name to a valid crate name (lowercase, replace spaces with hyphens, remove special chars)
+    const crateName = projectName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '') || 'contract';
     
-    if (template === 'counter') {
+    if (template === 'blank' || template === 'empty') {
+      // Create blank project with empty lib.rs, Cargo.toml with project name, and .cargo/config.toml
+      defaultFiles = [
+        {
+          name: 'lib.rs',
+          type: 'file',
+          content: ''
+        },
+        {
+          name: 'Cargo.toml',
+          type: 'file',
+          content: `[package]
+name = "${crateName}"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+soroban-sdk = "22.0.0"
+
+[dev-dependencies]
+soroban-sdk = { version = "22.0.0", features = ["testutils"] }
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true`
+        },
+        {
+          name: '.cargo/config.toml',
+          type: 'file',
+          content: `[target.wasm32v1-none]
+rustflags = [
+    "-C", "target-feature=-crt-static",
+    "-C", "link-arg=--no-entry"
+]`
+        }
+      ];
+    } else if (template === 'counter') {
       defaultFiles = [
         {
           name: 'lib.rs',
@@ -863,8 +906,9 @@ rustflags = [
     }
 
     const project = new Project({
-      name: name || 'Untitled Project',
-      files: defaultFiles
+      name: projectName,
+      files: defaultFiles,
+      isLocal: isLocal === true || isLocal === 'true'
     });
 
     const savedProject = await project.save();
