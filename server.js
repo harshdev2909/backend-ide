@@ -2,6 +2,8 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
+const passport = require('passport');
 const mongoose = require('mongoose');
 require('dotenv').config();
 
@@ -70,7 +72,9 @@ app.use((req, res, next) => {
 
 // Middleware - CORS configuration
 app.use(cors(corsOptions));
+app.use(cookieParser());
 app.use(express.json());
+app.use(passport.initialize());
 
 // MongoDB connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/soroban-ide';
@@ -86,12 +90,19 @@ app.get('/api/health', (req, res) => {
 });
 
 // Routes
+app.use('/api/auth', require('./routes/auth'));
 app.use('/api/projects', require('./routes/projects'));
 app.use('/api/compile', require('./routes/compile'));
 app.use('/api/deploy', require('./routes/deploy'));
 app.use('/api/templates', require('./routes/templates'));
 app.use('/api/jobs', require('./routes/jobs'));
-app.use('/api/invites', require('./routes/invites'));
+// Commented out invite system - replaced with premium gifting
+// app.use('/api/invites', require('./routes/invites'));
+app.use('/api/subscriptions', require('./routes/subscriptions'));
+app.use('/api/premium-gifts', require('./routes/premium-gifts'));
+app.use('/api/payments', require('./routes/payments'));
+app.use('/api/usage', require('./routes/usage'));
+app.use('/api/contracts', require('./routes/contracts'));
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {

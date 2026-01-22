@@ -5,6 +5,7 @@ const compilationService = require('../services/compilationService');
 const socketService = require('../services/socketService');
 const Job = require('../models/Job');
 const Project = require('../models/Project');
+const UsageLog = require('../models/UsageLog');
 
 // Initialize socket service for Redis pub/sub (workers don't have Socket.IO instance)
 socketService.init(null);
@@ -19,7 +20,7 @@ const COMPILE_WORKER_CONCURRENCY = parseInt(process.env.COMPILE_WORKER_CONCURREN
  * Process compile job
  */
 async function processCompileJob(job) {
-  const { projectId, files, jobId } = job.data;
+  const { projectId, files, jobId, userId } = job.data;
   
   console.log(`[CompileWorker] Processing compile job ${job.id} for project ${projectId}`);
   
@@ -86,6 +87,26 @@ async function processCompileJob(job) {
       } catch (updateError) {
         console.warn(`[CompileWorker] Could not update project ${projectId}:`, updateError.message);
         // Don't fail the job if project update fails
+      }
+    }
+    
+    // Update usage log
+    if (userId) {
+      try {
+        await UsageLog.findOneAndUpdate(
+          { userId, action: 'compile', projectId, success: false },
+          {
+            success: result.success,
+            error: result.success ? null : (result.error || 'Compilation failed'),
+            metadata: {
+              wasmFile: result.output?.wasmFile,
+              compilationType: result.compilationType
+            }
+          },
+          { sort: { createdAt: -1 } }
+        );
+      } catch (logError) {
+        console.warn(`[CompileWorker] Could not update usage log:`, logError.message);
       }
     }
 

@@ -9,10 +9,11 @@ const compileQueue = createQueue(COMPILE_QUEUE_NAME);
  * @param {string} payload.projectId - MongoDB project ID
  * @param {Array} payload.files - Array of files to compile
  * @param {string} payload.jobId - MongoDB job document ID
+ * @param {string} payload.userId - User ID for usage tracking
  * @returns {Promise<Job>} BullMQ job instance
  */
 async function addCompileJob(payload) {
-  const { projectId, files, jobId } = payload;
+  const { projectId, files, jobId, userId } = payload;
   
   if (!projectId || !files || !jobId) {
     throw new Error('Missing required parameters: projectId, files, and jobId');
@@ -21,7 +22,8 @@ async function addCompileJob(payload) {
   const job = await compileQueue.add('compile', {
     projectId,
     files,
-    jobId
+    jobId,
+    userId
   }, {
     jobId: `compile-${jobId}`, // Use MongoDB job ID as BullMQ job ID
     priority: 1

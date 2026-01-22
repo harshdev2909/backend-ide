@@ -21,6 +21,12 @@ const projectSchema = new mongoose.Schema({
     required: true,
     default: 'Untitled Project'
   },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
+  },
   files: [fileSchema],
   createdAt: {
     type: Date,
@@ -58,6 +64,9 @@ const projectSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
+
+// Indexes
+projectSchema.index({ userId: 1, updatedAt: -1 });
 
 // Update the updatedAt field when files are modified
 projectSchema.pre('save', function(next) {

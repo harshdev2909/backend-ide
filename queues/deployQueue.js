@@ -10,11 +10,12 @@ const deployQueue = createQueue(DEPLOY_QUEUE_NAME);
  * @param {string} payload.wasmBase64 - Base64 encoded WASM file
  * @param {string} payload.network - Network to deploy to (default: testnet)
  * @param {string} payload.jobId - MongoDB job document ID
+ * @param {string} payload.userId - User ID for usage tracking
  * @param {Object} payload.walletInfo - Optional wallet information
  * @returns {Promise<Job>} BullMQ job instance
  */
 async function addDeployJob(payload) {
-  const { projectId, wasmBase64, network = 'testnet', jobId, walletInfo } = payload;
+  const { projectId, wasmBase64, network = 'testnet', jobId, userId, walletInfo } = payload;
   
   if (!projectId || !wasmBase64 || !jobId) {
     throw new Error('Missing required parameters: projectId, wasmBase64, and jobId');
@@ -25,6 +26,7 @@ async function addDeployJob(payload) {
     wasmBase64,
     network,
     jobId,
+    userId,
     walletInfo
   }, {
     jobId: `deploy-${jobId}`, // Use MongoDB job ID as BullMQ job ID

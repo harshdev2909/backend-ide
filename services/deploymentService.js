@@ -5,6 +5,7 @@ const os = require('os');
 const util = require('util');
 const execAsync = util.promisify(exec);
 const socketService = require('./socketService');
+const StellarSdk = require('@stellar/stellar-sdk');
 
 // Check if Stellar CLI is available
 let stellarAvailable = false;
@@ -407,7 +408,7 @@ class DeploymentService {
   }
 
   /**
-   * Invoke a contract function
+   * Invoke a contract function using Soroban RPC (SDK-based, no CLI required)
    */
   async invokeContract(contractId, functionName, args = [], sourceAccount = null, network = 'testnet') {
     const logs = [];
@@ -426,7 +427,257 @@ class DeploymentService {
       log('info', `Invoking contract function: ${functionName}`);
       log('info', `Contract ID: ${contractId}`);
 
-      // Use default keypair if no source account provided
+      // Use Soroban RPC instead of CLI
+      const sorobanRpcUrl = network === 'testnet' 
+        ? 'https://soroban-testnet.stellar.org'
+        : 'https://soroban-mainnet.stellar.org';
+      
+      // Check if SorobanRpc is available in SDK
+      let SorobanRpc;
+      try {
+        SorobanRpc = StellarSdk.SorobanRpc || StellarSdk.rpc;
+        if (!SorobanRpc) {
+          throw new Error('SorobanRpc not available in SDK');
+        }
+      } catch (sdkError) {
+        log('warning', 'SorobanRpc not available, falling back to CLI');
+        if (stellarAvailable) {
+          return this.invokeContractCLI(contractId, functionName, args, sourceAccount, network);
+        }
+        throw new Error('Soroban RPC not available and CLI not installed. Please install Stellar CLI or update SDK.');
+      }
+
+      const server = new SorobanRpc.Server(sorobanRpcUrl);
+      log('info', `Using Soroban RPC: ${sorobanRpcUrl}`);
+
+      // Get the default keypair for signing
+      let keypair;
+      try {
+        // Try to get keypair from CLI first (if available)
+        if (stellarAvailable) {
+          const sourceKeypair = sourceAccount || this.defaultKeypairName;
+          const { stdout: secretKey } = await execAsync(`stellar keys show ${sourceKeypair} --secret`);
+          const secretKeyStr = secretKey.trim();
+          if (secretKeyStr && secretKeyStr.startsWith('S') && secretKeyStr.length === 56) {
+            keypair = StellarSdk.Keypair.fromSecret(secretKeyStr);
+          } else {
+            throw new Error('Invalid secret key format from CLI');
+          }
+        } else {
+          // If CLI not available, use environment variable
+          const secretKey = process.env.DEPLOY_SECRET_KEY;
+          if (secretKey && secretKey.startsWith('S') && secretKey.length === 56) {
+            log('info', 'Using keypair from DEPLOY_SECRET_KEY environment variable');
+            keypair = StellarSdk.Keypair.fromSecret(secretKey);
+          } else {
+            // Generate a new keypair for this invocation (read-only operations)
+            log('warning', 'No valid keypair found, generating temporary keypair for read-only operation');
+            keypair = StellarSdk.Keypair.random();
+            log('info', `Generated temporary keypair: ${keypair.publicKey()}`);
+          }
+        }
+      } catch (keypairError) {
+        log('warning', `Failed to load keypair: ${keypairError.message}`);
+        // Generate a new keypair as fallback
+        try {
+          log('info', 'Generating temporary keypair as fallback');
+          keypair = StellarSdk.Keypair.random();
+          log('info', `Generated fallback keypair: ${keypair.publicKey()}`);
+        } catch (genError) {
+          log('error', `Failed to generate keypair: ${genError.message}`);
+          throw new Error('Unable to create keypair for contract invocation. Please set DEPLOY_SECRET_KEY environment variable or install Stellar CLI.');
+        }
+      }
+
+      const sourceAccountAddress = keypair.publicKey();
+      log('info', `Source account: ${sourceAccountAddress}`);
+
+      // Get account from RPC server
+      let account;
+      try {
+        account = await server.getAccount(sourceAccountAddress);
+      } catch (accountError) {
+        // If account doesn't exist, we need to fund it or use a different approach
+        // For testnet, try to get a friendbot-funded account or use a well-known test account
+        log('warning', `Account ${sourceAccountAddress} not found on network`);
+        
+        // Try to get a minimal account for simulation
+        // Use the SDK's Account class to create a minimal account
+        try {
+          // Create a new account object with sequence 0 for simulation
+          account = new StellarSdk.Account(sourceAccountAddress, '0');
+        } catch (accError) {
+          log('error', `Failed to create account object: ${accError.message}`);
+          throw new Error(`Account ${sourceAccountAddress} does not exist on network. Please fund the account or set DEPLOY_SECRET_KEY to a funded account's secret key.`);
+        }
+      }
+      
+      // Create contract instance
+      const contract = new StellarSdk.Contract(contractId);
+      
+      // Convert args to ScVal format
+      const scValArgs = args.map(arg => {
+        try {
+          // Try to parse as number
+          if (typeof arg === 'string' && !isNaN(arg) && !isNaN(parseFloat(arg))) {
+            const num = parseInt(arg);
+            return StellarSdk.nativeToScVal(num, { type: 'i128' });
+          }
+          // Try as symbol (for simple string args like "gm")
+          if (typeof arg === 'string') {
+            // Use symbol_short for short strings
+            return StellarSdk.nativeToScVal(arg, { type: 'symbol' });
+          }
+          return StellarSdk.nativeToScVal(arg);
+        } catch (e) {
+          log('warning', `Could not convert arg ${arg}: ${e.message}, using as string`);
+          try {
+            return StellarSdk.nativeToScVal(String(arg), { type: 'string' });
+          } catch (strError) {
+            log('error', `Failed to convert arg to string: ${strError.message}`);
+            throw new Error(`Invalid argument format: ${arg}`);
+          }
+        }
+      });
+
+      // Build transaction using contract.call()
+      const networkPassphrase = network === 'testnet' 
+        ? StellarSdk.Networks.TESTNET 
+        : StellarSdk.Networks.PUBLIC;
+
+      let transaction = new StellarSdk.TransactionBuilder(account, {
+        fee: StellarSdk.BASE_FEE,
+        networkPassphrase: networkPassphrase
+      })
+        .addOperation(contract.call(functionName, ...scValArgs))
+        .setTimeout(30)
+        .build();
+
+      // Simulate transaction
+      log('info', 'Simulating transaction...');
+      const simulateResponse = await server.simulateTransaction(transaction);
+      
+      if (simulateResponse.errorResult) {
+        const errorStr = JSON.stringify(simulateResponse.errorResult);
+        log('error', `Simulation failed: ${errorStr}`);
+        throw new Error(`Simulation failed: ${errorStr}`);
+      }
+
+      // Get result from simulation
+      let output = null;
+      if (simulateResponse.result && simulateResponse.result.retval) {
+        try {
+          const retval = simulateResponse.result.retval;
+          
+          // retval is a base64-encoded XDR ScVal, decode it
+          let scVal;
+          try {
+            // Try to decode from base64 XDR
+            scVal = StellarSdk.xdr.ScVal.fromXDR(retval, 'base64');
+          } catch (xdrError) {
+            // If that fails, retval might already be an object
+            scVal = retval;
+          }
+          
+          // Try to convert ScVal to readable format
+          if (scVal && typeof scVal.switch === 'function') {
+            const scValType = scVal.switch();
+            if (scValType === StellarSdk.xdr.ScValType.scvSymbol()) {
+              output = scVal.sym().toString();
+            } else if (scValType === StellarSdk.xdr.ScValType.scvString()) {
+              output = scVal.str().toString();
+            } else if (scValType === StellarSdk.xdr.ScValType.scvI128()) {
+              // Handle i128 - it's a struct with high and low parts
+              const i128 = scVal.i128();
+              if (i128 && i128.hi && i128.lo !== undefined) {
+                // Convert to BigInt for large numbers
+                const high = BigInt(i128.hi.toString());
+                const low = BigInt(i128.lo.toString());
+                const result = (high << 64n) + (low < 0n ? low + (1n << 64n) : low);
+                output = result.toString();
+              } else {
+                output = scVal.i128().toString();
+              }
+            } else if (scValType === StellarSdk.xdr.ScValType.scvI32()) {
+              output = scVal.i32().toString();
+            } else if (scValType === StellarSdk.xdr.ScValType.scvU32()) {
+              output = scVal.u32().toString();
+            } else if (scValType === StellarSdk.xdr.ScValType.scvBool()) {
+              output = scVal.b().toString();
+            } else {
+              // For other types, try to stringify
+              try {
+                output = JSON.stringify(scVal);
+              } catch (e) {
+                output = scVal.toString();
+              }
+            }
+          } else if (scVal) {
+            // If it's not an ScVal object, try to stringify
+            output = typeof scVal === 'string' ? scVal : JSON.stringify(scVal);
+          }
+        } catch (decodeError) {
+          log('warning', `Could not decode result: ${decodeError.message}`);
+          log('warning', `Result structure: ${JSON.stringify(simulateResponse.result)}`);
+          output = 'Unable to decode result (check logs for details)';
+        }
+      }
+      
+      // If no output was decoded, indicate success but no return value
+      if (output === null) {
+        output = 'Function executed successfully (no return value)';
+      }
+
+      log('success', 'Contract function invoked successfully');
+      log('info', `Output: ${output}`);
+
+      return {
+        success: true,
+        logs,
+        output: output,
+        contractId,
+        functionName,
+        args
+      };
+
+    } catch (error) {
+      log('error', `Contract invocation failed: ${error.message}`);
+      log('error', `Stack: ${error.stack}`);
+      
+      // Fallback to CLI if SDK method fails and CLI is available
+      if (stellarAvailable) {
+        log('info', 'Falling back to CLI method...');
+        return this.invokeContractCLI(contractId, functionName, args, sourceAccount, network);
+      }
+      
+      return {
+        success: false,
+        logs,
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Invoke a contract function using CLI (fallback method)
+   */
+  async invokeContractCLI(contractId, functionName, args = [], sourceAccount = null, network = 'testnet') {
+    const logs = [];
+    
+    const log = (type, message) => {
+      const logEntry = {
+        type,
+        message,
+        timestamp: new Date().toISOString()
+      };
+      logs.push(logEntry);
+      console.log(`[${type.toUpperCase()}] ${message}`);
+    };
+
+    try {
+      log('info', `Invoking contract function via CLI: ${functionName}`);
+      log('info', `Contract ID: ${contractId}`);
+
       const sourceKeypair = sourceAccount || this.defaultKeypairName;
 
       // Build invoke command

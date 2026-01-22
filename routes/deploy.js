@@ -3,18 +3,49 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const Job = require('../models/Job');
 const Project = require('../models/Project');
+const UsageLog = require('../models/UsageLog');
 const { addDeployJob } = require('../queues/deployQueue');
 const deploymentService = require('../services/deploymentService');
+const { authenticate } = require('../middleware/auth');
 
 // POST /api/deploy - Deploy a smart contract (queued)
-router.post('/', async (req, res) => {
+router.post('/', authenticate, async (req, res) => {
   try {
     const { projectId, wasmBase64, network = 'testnet', walletInfo } = req.body;
+    const user = req.user;
     
     if (!projectId || !wasmBase64) {
       return res.status(400).json({
         success: false,
         error: 'Missing required parameters: projectId and wasmBase64'
+      });
+    }
+
+    // Check deployment limit
+    const canDeploy = user.canDeploy();
+    if (!canDeploy.allowed) {
+      return res.status(403).json({
+        success: false,
+        error: canDeploy.reason,
+        current: canDeploy.current,
+        limit: canDeploy.limit,
+        upgradeRequired: true
+      });
+    }
+
+    // Verify project belongs to user
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({
+        success: false,
+        error: 'Project not found'
+      });
+    }
+    
+    if (project.userId.toString() !== user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        error: 'You do not have permission to deploy this project'
       });
     }
 
@@ -29,7 +60,8 @@ router.post('/', async (req, res) => {
       wasmBase64,
       network,
       jobId: jobIdString,
-      walletInfo
+      walletInfo,
+      userId: user._id.toString()
     });
 
     // Verify BullMQ job was created
@@ -42,11 +74,25 @@ router.post('/', async (req, res) => {
       _id: jobId,
       type: 'deploy',
       status: 'queued',
+      userId: user._id,
       project: projectId,
       bullJobId: bullJob.id || bullJobId
     });
     
     await job.save();
+    
+    // Log usage attempt
+    const usageLog = new UsageLog({
+      userId: user._id,
+      action: 'deploy',
+      projectId,
+      success: false,
+      metadata: {
+        network,
+        jobId: jobIdString
+      }
+    });
+    await usageLog.save();
 
     // Return 202 Accepted with job ID and initial logs
     res.status(202).json({

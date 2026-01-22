@@ -246,4 +246,8 @@ target/
 .env
 .env.local
 .env.production
-.env.development 
+.env.development
+
+# Receipt PDFs
+receipts/
+*.pdf 

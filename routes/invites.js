@@ -1,12 +1,18 @@
+/* 
+ * INVITE SYSTEM - COMMENTED OUT
+ * This entire invite system has been replaced with premium gifting functionality.
+ * The new system allows gifting premium subscriptions directly to users via email.
+ * See /api/premium-gifts routes for the new implementation.
+ */
+
+/*
 const express = require('express');
 const router = express.Router();
 const Invite = require('../models/Invite');
 const crypto = require('crypto');
 const emailService = require('../services/emailService');
 
-/**
- * Generate invite code format: INV-XXXX-XXXX-XXXX
- */
+// Generate invite code format: INV-XXXX-XXXX-XXXX
 function generateInviteCode() {
   const segments = [];
   for (let i = 0; i < 3; i++) {
@@ -15,10 +21,8 @@ function generateInviteCode() {
   return `INV-${segments.join('-')}`;
 }
 
-/**
- * POST /api/invites/send
- * Admin endpoint: Send invite code to an email
- */
+// POST /api/invites/send
+// Admin endpoint: Send invite code to an email
 router.post('/send', async (req, res) => {
   try {
     const { email } = req.body;
@@ -112,13 +116,8 @@ router.post('/send', async (req, res) => {
   }
 });
 
-/**
- * POST /api/invites/check
- * User endpoint: Check if invite exists for email (waitlist-first approach)
- * - If email doesn't exist: Create invite entry and add to waitlist
- * - If email exists but no invite sent: Already in waitlist
- * - If email exists and invite sent: Show invite code input
- */
+// POST /api/invites/check
+// User endpoint: Check if invite exists for email (waitlist-first approach)
 router.post('/check', async (req, res) => {
   try {
     const { email } = req.body;
@@ -138,7 +137,7 @@ router.post('/check', async (req, res) => {
       invite = new Invite({
         email: normalizedEmail,
         inviteCode: generateInviteCode(),
-        sent: false, // Not sent yet - admin will send later
+        sent: false,
         sentAt: null
       });
       await invite.save();
@@ -163,7 +162,7 @@ router.post('/check', async (req, res) => {
       });
     }
 
-    // Invite has been sent - always allow code input (codes can be used multiple times)
+    // Invite has been sent - always allow code input
     return res.json({
       success: true,
       hasInvite: true,
@@ -183,10 +182,8 @@ router.post('/check', async (req, res) => {
   }
 });
 
-/**
- * POST /api/invites/validate
- * User endpoint: Validate and use invite code
- */
+// POST /api/invites/validate
+// User endpoint: Validate and use invite code
 router.post('/validate', async (req, res) => {
   try {
     const { email, inviteCode } = req.body;
@@ -219,38 +216,18 @@ router.post('/validate', async (req, res) => {
       });
     }
 
-    
     const storedCodeNormalized = (emailInvite.inviteCode || '').toUpperCase().trim().replace(/\s+/g, '');
     const providedCodeNormalized = normalizedCode.replace(/\s+/g, '');
 
-    // Debug logging
-    console.log('[Invites] Validation attempt:', {
-      email: normalizedEmail,
-      providedCode: providedCodeNormalized,
-      storedCode: storedCodeNormalized,
-      storedOriginal: emailInvite.inviteCode,
-      codesMatch: storedCodeNormalized === providedCodeNormalized
-    });
-
     // Validate the code matches
     if (storedCodeNormalized !== providedCodeNormalized) {
-      console.log('[Invites] Code mismatch:', {
-        stored: storedCodeNormalized,
-        provided: providedCodeNormalized,
-        storedOriginal: emailInvite.inviteCode,
-        providedOriginal: inviteCode
-      });
       return res.status(400).json({
         success: false,
-        error: 'Invalid invite code. Please check and try again.',
-        debug: process.env.NODE_ENV === 'development' ? {
-          stored: storedCodeNormalized,
-          provided: providedCodeNormalized
-        } : undefined
+        error: 'Invalid invite code. Please check and try again.'
       });
     }
 
-    // Mark as used only if not already used (allow re-validation)
+    // Mark as used only if not already used
     if (!emailInvite.used) {
       await emailInvite.markAsUsed(normalizedEmail);
     }
@@ -275,10 +252,8 @@ router.post('/validate', async (req, res) => {
   }
 });
 
-/**
- * GET /api/invites
- * Admin endpoint: List all invites with filters
- */
+// GET /api/invites
+// Admin endpoint: List all invites with filters
 router.get('/', async (req, res) => {
   try {
     const { email, sent, used, limit = 100, skip = 0 } = req.query;
@@ -323,10 +298,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-/**
- * POST /api/invites/send-bulk
- * Admin endpoint: Send invite codes to multiple emails
- */
+// POST /api/invites/send-bulk
+// Admin endpoint: Send invite codes to multiple emails
 router.post('/send-bulk', async (req, res) => {
   try {
     const { emails } = req.body;
@@ -363,7 +336,6 @@ router.post('/send-bulk', async (req, res) => {
       const normalizedEmail = email.toLowerCase().trim();
 
       try {
-        // Check if invite already exists
         let invite = await Invite.findOne({ email: normalizedEmail });
 
         if (invite && invite.sent && invite.used) {
@@ -375,7 +347,6 @@ router.post('/send-bulk', async (req, res) => {
         }
 
         if (!invite) {
-          // Create new invite
           invite = new Invite({
             email: normalizedEmail,
             inviteCode: generateInviteCode(),
@@ -384,11 +355,9 @@ router.post('/send-bulk', async (req, res) => {
           });
           await invite.save();
         } else if (!invite.sent) {
-          // Mark as sent
           await invite.markAsSent();
         }
 
-        // Send email
         const emailResult = await emailService.sendInviteCode(normalizedEmail, invite.inviteCode);
 
         if (emailResult.success) {
@@ -409,7 +378,6 @@ router.post('/send-bulk', async (req, res) => {
         });
       }
 
-      // Small delay to avoid rate limiting
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
@@ -437,10 +405,8 @@ router.post('/send-bulk', async (req, res) => {
   }
 });
 
-/**
- * POST /api/invites/generate-bulk
- * Admin endpoint: Generate multiple invite codes (for initial setup)
- */
+// POST /api/invites/generate-bulk
+// Admin endpoint: Generate multiple invite codes
 router.post('/generate-bulk', async (req, res) => {
   try {
     const { count = 50, emails } = req.body;
@@ -460,14 +426,13 @@ router.post('/generate-bulk', async (req, res) => {
       const email = emailList[i] || `invite-${Date.now()}-${i}@placeholder.com`;
       const normalizedEmail = email.toLowerCase().trim();
 
-      // Check if invite already exists
       let invite = await Invite.findOne({ email: normalizedEmail });
       
       if (!invite) {
         invite = new Invite({
           email: normalizedEmail,
           inviteCode: generateInviteCode(),
-          sent: false // Not sent yet, admin will send via /send endpoint
+          sent: false
         });
         await invite.save();
       }
@@ -497,4 +462,18 @@ router.post('/generate-bulk', async (req, res) => {
 });
 
 module.exports = router;
+*/
 
+// Export empty router since invite system is disabled
+const express = require('express');
+const router = express.Router();
+
+// All invite routes are disabled - use /api/premium-gifts instead
+router.use((req, res) => {
+  res.status(410).json({
+    success: false,
+    error: 'Invite system has been disabled. Please use the premium gifting system at /api/premium-gifts instead.'
+  });
+});
+
+module.exports = router;

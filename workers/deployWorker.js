@@ -5,6 +5,8 @@ const deploymentService = require('../services/deploymentService');
 const socketService = require('../services/socketService');
 const Job = require('../models/Job');
 const Project = require('../models/Project');
+const User = require('../models/User');
+const UsageLog = require('../models/UsageLog');
 
 // Initialize socket service for Redis pub/sub (workers don't have Socket.IO instance)
 socketService.init(null);
@@ -19,7 +21,7 @@ const DEPLOY_WORKER_CONCURRENCY = parseInt(process.env.DEPLOY_WORKER_CONCURRENCY
  * Process deploy job
  */
 async function processDeployJob(job) {
-  const { projectId, wasmBase64, network, jobId, walletInfo } = job.data;
+  const { projectId, wasmBase64, network, jobId, walletInfo, userId } = job.data;
   
   console.log(`[DeployWorker] Processing deploy job ${job.id} for project ${projectId}`);
   
@@ -92,6 +94,52 @@ async function processDeployJob(job) {
       } catch (updateError) {
         console.warn(`[DeployWorker] Could not update project ${projectId}:`, updateError.message);
         // Don't fail the job if project update fails
+      }
+      
+      // Increment user deployment count and update usage log
+      if (userId) {
+        try {
+          const user = await User.findById(userId);
+          if (user) {
+            await user.incrementDeployment();
+            
+            // Update usage log
+            await UsageLog.findOneAndUpdate(
+              { userId, action: 'deploy', projectId, success: false },
+              {
+                success: true,
+                contractAddress: result.contractAddress,
+                metadata: {
+                  ...result,
+                  network
+                }
+              },
+              { sort: { createdAt: -1 } }
+            );
+          }
+        } catch (userError) {
+          console.warn(`[DeployWorker] Could not update user deployment count:`, userError.message);
+        }
+      }
+    } else {
+      // Update usage log on failure
+      if (userId) {
+        try {
+          await UsageLog.findOneAndUpdate(
+            { userId, action: 'deploy', projectId, success: false },
+            {
+              success: false,
+              error: result.error || 'Deployment failed',
+              metadata: {
+                network,
+                error: result.error
+              }
+            },
+            { sort: { createdAt: -1 } }
+          );
+        } catch (logError) {
+          console.warn(`[DeployWorker] Could not update usage log:`, logError.message);
+        }
       }
     }
 

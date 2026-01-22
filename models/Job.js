@@ -12,6 +12,12 @@ const jobSchema = new mongoose.Schema({
     default: 'queued',
     required: true
   },
+  userId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
+    index: true
+  },
   project: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Project',
@@ -35,6 +41,7 @@ const jobSchema = new mongoose.Schema({
 });
 
 // Index for faster queries
+jobSchema.index({ userId: 1, createdAt: -1 });
 jobSchema.index({ project: 1, createdAt: -1 });
 jobSchema.index({ status: 1, createdAt: -1 });
 // Note: bullJobId index is automatically created by unique: true

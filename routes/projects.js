@@ -1,12 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const Project = require('../models/Project');
+const { authenticate } = require('../middleware/auth');
 
-// GET /api/projects - List all projects (exclude local projects)
-router.get('/', async (req, res) => {
+// GET /api/projects - List all projects for current user
+router.get('/', authenticate, async (req, res) => {
   try {
-    // Exclude projects marked as local (private projects not shown in list)
-    const projects = await Project.find({ isLocal: { $ne: true } }).sort({ updatedAt: -1 });
+    const user = req.user;
+    // Get all projects for this user (exclude local projects from list view)
+    const projects = await Project.find({ 
+      userId: user._id,
+      isLocal: { $ne: true } 
+    }).sort({ updatedAt: -1 });
     res.json(projects);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch projects' });
@@ -14,9 +19,10 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/projects - Create new project
-router.post('/', async (req, res) => {
+router.post('/', authenticate, async (req, res) => {
   try {
     const { name, files, template, isLocal } = req.body;
+    const user = req.user;
     
     let defaultFiles;
     const projectName = name || 'Untitled Project';
@@ -907,6 +913,7 @@ rustflags = [
 
     const project = new Project({
       name: projectName,
+      userId: user._id,
       files: defaultFiles,
       isLocal: isLocal === true || isLocal === 'true'
     });
@@ -919,12 +926,19 @@ rustflags = [
 });
 
 // GET /api/projects/:id - Get single project
-router.get('/:id', async (req, res) => {
+router.get('/:id', authenticate, async (req, res) => {
   try {
+    const user = req.user;
     const project = await Project.findById(req.params.id);
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
+    
+    // Verify project belongs to user
+    if (project.userId.toString() !== user._id.toString()) {
+      return res.status(403).json({ error: 'You do not have permission to access this project' });
+    }
+    
     res.json(project);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch project' });
@@ -932,11 +946,22 @@ router.get('/:id', async (req, res) => {
 });
 
 // PUT /api/projects/:id - Update project
-router.put('/:id', async (req, res) => {
+router.put('/:id', authenticate, async (req, res) => {
   try {
+    const user = req.user;
     const { name, files } = req.body;
-    const updateData = {};
     
+    // Verify project belongs to user
+    const existingProject = await Project.findById(req.params.id);
+    if (!existingProject) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+    
+    if (existingProject.userId.toString() !== user._id.toString()) {
+      return res.status(403).json({ error: 'You do not have permission to update this project' });
+    }
+    
+    const updateData = {};
     if (name !== undefined) updateData.name = name;
     if (files !== undefined) updateData.files = files;
     
@@ -946,10 +971,6 @@ router.put('/:id', async (req, res) => {
       { new: true, runValidators: true }
     );
     
-    if (!project) {
-      return res.status(404).json({ error: 'Project not found' });
-    }
-    
     res.json(project);
   } catch (error) {
     res.status(500).json({ error: 'Failed to update project' });
@@ -957,12 +978,21 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE /api/projects/:id - Delete project
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authenticate, async (req, res) => {
   try {
-    const project = await Project.findByIdAndDelete(req.params.id);
+    const user = req.user;
+    
+    // Verify project belongs to user
+    const project = await Project.findById(req.params.id);
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
     }
+    
+    if (project.userId.toString() !== user._id.toString()) {
+      return res.status(403).json({ error: 'You do not have permission to delete this project' });
+    }
+    
+    await Project.findByIdAndDelete(req.params.id);
     res.json({ message: 'Project deleted successfully' });
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete project' });
